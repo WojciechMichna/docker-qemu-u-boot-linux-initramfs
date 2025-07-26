@@ -1,0 +1,53 @@
+#!/bin/bash
+set -e
+
+IMG="/opt/disk.img"
+MOUNTPOINT="/opt/mnt"
+
+dd if=/dev/zero of=$IMG bs=1M count=64
+echo -e "o\nn\np\n1\n\n\nw" | fdisk $IMG
+
+# Step 1: Attach the disk image to a free loop device with partition scanning
+LOOPDEV=$(losetup --find --partscan --show "$IMG")
+echo "[i] Attached $IMG to $LOOPDEV"
+
+PART="${LOOPDEV}p1"
+BASENAME=$(basename "$PART")
+
+# Step 2: Check if the partition was recognized by the kernel
+LINE=$(awk "\$4==\"$BASENAME\" { print }" /proc/partitions)
+if [ -z "$LINE" ]; then
+  echo "[!] Partition $BASENAME not found in /proc/partitions – something went wrong"
+  exit 1
+fi
+
+# Step 3: Extract major and minor device numbers
+MAJOR=$(echo "$LINE" | awk '{print $1}')
+MINOR=$(echo "$LINE" | awk '{print $2}')
+
+# Step 4: If the device node doesn't exist, create it manually
+if [ ! -e "$PART" ]; then
+  echo "[i] Creating missing device $PART (major=$MAJOR, minor=$MINOR)"
+  mknod "$PART" b "$MAJOR" "$MINOR"
+  chmod 660 "$PART"
+else
+  echo "[i] $PART already exists"
+fi
+
+mkfs.ext4 $PART
+mkdir -p $MOUNTPOINT
+mount $PART $MOUNTPOINT
+
+cp /opt/linux-5.10/arch/arm64/boot/Image $MOUNTPOINT
+cp /opt/initramfs_dir/initramfs.cpio.gz $MOUNTPOINT
+
+umount $MOUNTPOINT
+losetup -d "$LOOPDEV"
+
+qemu-system-aarch64 \
+    -machine virt \
+    -nographic \
+    -cpu cortex-a57 \
+    -bios /opt/u-boot/u-boot.bin \
+    -drive if=none,file=$IMG,format=raw,id=VIRTIO1 \
+    -device virtio-blk,drive=VIRTIO1

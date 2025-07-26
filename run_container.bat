@@ -1,0 +1,1 @@
+docker run --name qemu --privileged=true -it --entrypoint /bin/bash uboot-builder
