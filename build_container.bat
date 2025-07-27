@@ -1,1 +1,1 @@
-docker build -t uboot-builder .
+docker build -t uboot-initramfs-qemu .
